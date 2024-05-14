@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt install -y ninja-build \
+            clang-format \
+            libboost-dev \
+            libfcitx5core-dev \
+            libfcitx5utils-dev
+
+      - name: Lint
+        run: |
+          find src -name '*.cpp' -o -name '*.h' | xargs clang-format -Werror --dry-run || { echo Please lint your code by '"'"find src -name '*.cpp' -o -name '*.h' | xargs clang-format -i"'"'.; false; }
+
+      - name: Build
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DFCITX_INSTALL_USE_FCITX_SYS_PATHS=ON
+          cmake --build build
+          sudo cmake --install build
