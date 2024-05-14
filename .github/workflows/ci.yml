@@ -20,6 +20,7 @@ jobs:
           apt install -y ninja-build \
             cmake \
             g++ \
+            gettext \
             clang-format \
             libboost-dev \
             libfcitx5core-dev \
