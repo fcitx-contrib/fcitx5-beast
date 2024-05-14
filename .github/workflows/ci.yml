@@ -16,6 +16,7 @@ jobs:
 
       - name: Install dependencies
         run: |
+          apt update
           apt install -y ninja-build \
             cmake \
             g++ \
