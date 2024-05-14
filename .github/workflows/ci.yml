@@ -31,3 +31,7 @@ jobs:
             -DFCITX_INSTALL_USE_FCITX_SYS_PATHS=ON
           cmake --build build
           sudo cmake --install build
+
+      - name: Setup tmate session
+        if: ${{ failure() }}
+        uses: mxschmitt/action-tmate@v3
