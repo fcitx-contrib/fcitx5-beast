@@ -28,7 +28,7 @@ jobs:
 
       - name: Lint
         run: |
-          find src -name '*.cpp' -o -name '*.h' | xargs clang-format -Werror --dry-run || { echo Please lint your code by '"'"find src -name '*.cpp' -o -name '*.h' | xargs clang-format -i"'"'.; false; }
+          find src test -name '*.cpp' -o -name '*.h' | xargs clang-format -Werror --dry-run || { echo Please lint your code by '"'"find src test -name '*.cpp' -o -name '*.h' | xargs clang-format -i"'"'.; false; }
 
       - name: Build
         run: |
@@ -41,3 +41,9 @@ jobs:
       - name: Setup tmate session
         if: ${{ failure() }}
         uses: mxschmitt/action-tmate@v3
+
+      - name: Test
+        run:
+          cd build
+          XDG_CONFIG_HOME=`pwd` ctest --output-on-failure
+          rm -rf fcitx5
