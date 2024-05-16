@@ -38,12 +38,12 @@ jobs:
           cmake --build build
           cmake --install build
 
-      - name: Setup tmate session
-        if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
-
       - name: Test
-        run:
+        run: |
           cd build
           XDG_CONFIG_HOME=`pwd` ctest --output-on-failure
           rm -rf fcitx5
+
+      - name: Setup tmate session
+        if: ${{ failure() }}
+        uses: mxschmitt/action-tmate@v3
