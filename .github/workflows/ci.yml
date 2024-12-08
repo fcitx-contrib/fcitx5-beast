@@ -25,7 +25,7 @@ jobs:
     container: archlinux:latest
     steps:
       - name: Install dependencies
-        run: pacman -Syu --noconfirm base-devel clang cmake ninja extra-cmake-modules fmt libuv boost
+        run: pacman -Syu --noconfirm base-devel clang cmake ninja extra-cmake-modules fmt libuv boost lsof
 
       - uses: actions/checkout@v4
         with:
