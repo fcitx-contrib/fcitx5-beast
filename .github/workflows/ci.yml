@@ -57,7 +57,7 @@ jobs:
 
       - name: Test
         run: |
-          cd build
+          cd fcitx5-beast/build
           XDG_CONFIG_HOME=`pwd` ctest --output-on-failure
           rm -rf fcitx5
 
