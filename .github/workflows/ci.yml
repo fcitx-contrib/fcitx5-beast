@@ -7,40 +7,57 @@ on:
   pull_request:
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    container:
-      image: ubuntu:24.04
+  lint:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: |
-          apt update
-          apt install -y ninja-build \
-            cmake \
-            g++ \
-            gettext \
-            clang-format \
-            libboost-dev \
-            libfcitx5core-dev \
-            libfcitx5utils-dev
+        run: sudo apt install -y clang-format
 
       - name: Lint
         run: |
           find src test -name '*.cpp' -o -name '*.h' | xargs clang-format -Werror --dry-run || { echo Please lint your code by '"'"find src test -name '*.cpp' -o -name '*.h' | xargs clang-format -i"'"'.; false; }
 
-      - name: Build
-        run: |
-          cmake -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DFCITX_INSTALL_USE_FCITX_SYS_PATHS=ON
-          cmake --build build
-          cmake --install build
+  build:
+    runs-on: ubuntu-latest
+    needs: lint
+    container: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: pacman -Syu --noconfirm base-devel clang cmake ninja extra-cmake-modules fmt libuv boost lsof
+
+      - uses: actions/checkout@v4
+        with:
+          repository: fcitx/fcitx5
+          path: fcitx5
+
+      - name: Cache fcitx5 data files
+        uses: actions/cache@v4
+        with:
+          path: 'fcitx5/**/*.tar.*'
+          key: ${{ runner.os }}-${{ hashFiles('fcitx5/src/modules/spell/CMakeLists.txt')}}
+
+      - name: Build and Install fcitx5
+        uses: fcitx/github-actions@cmake
+        with:
+          path: fcitx5
+          cmake-option: >-
+            -DENABLE_KEYBOARD=Off -DENABLE_X11=Off -DENABLE_WAYLAND=Off -DENABLE_ENCHANT=Off
+            -DENABLE_DBUS=Off -DENABLE_SERVER=Off -DENABLE_EMOJI=Off -DUSE_SYSTEMD=Off -DENABLE_TEST=OFF
+
+      - uses: actions/checkout@v4
+        with:
+          path: fcitx5-beast
+
+      - name: Build and Install fcitx5-beast
+        uses: fcitx/github-actions@cmake
+        with:
+          path: fcitx5-beast
 
       - name: Test
         run: |
-          cd build
+          cd fcitx5-beast/build
           XDG_CONFIG_HOME=`pwd` ctest --output-on-failure
           rm -rf fcitx5
 
