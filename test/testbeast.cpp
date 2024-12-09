@@ -7,19 +7,18 @@
 
 using namespace fcitx;
 
+FCITX_DEFINE_STATIC_ADDON_REGISTRY(getStaticAddon)
+FCITX_IMPORT_ADDON_FACTORY(getStaticAddon, beast);
+
 int main() {
-    char arg0[] = "testhallelujah";
+    char arg0[] = "testbeast";
     char arg1[] = "--disable=all";
     char arg2[] = "--enable=beast";
     char *argv[] = {arg0, arg1, arg2};
     Log::setLogRule("default=5");
 
-    fcitx::BeastFactory beastFactory;
-    fcitx::StaticAddonRegistry staticAddons = {
-        std::make_pair<std::string, fcitx::AddonFactory *>("beast",
-                                                           &beastFactory)};
     Instance instance(FCITX_ARRAY_SIZE(argv), argv);
-    instance.addonManager().registerDefaultLoader(&staticAddons);
+    instance.addonManager().registerDefaultLoader(&getStaticAddon());
     EventDispatcher dispatcher;
     dispatcher.attach(&instance.eventLoop());
 

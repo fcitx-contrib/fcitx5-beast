@@ -196,6 +196,4 @@ void Beast::stopThread() {
 }
 } // namespace fcitx
 
-#ifdef FCITX_BEAST_IS_SHARED
-FCITX_ADDON_FACTORY(fcitx::BeastFactory)
-#endif
+FCITX_ADDON_FACTORY_V2(beast, fcitx::BeastFactory)
