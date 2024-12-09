@@ -17,6 +17,7 @@ int main() {
     char *argv[] = {arg0, arg1, arg2};
     Log::setLogRule("default=5");
 
+    Instance instance(FCITX_ARRAY_SIZE(argv), argv);
     instance.addonManager().registerDefaultLoader(&getStaticAddon());
     EventDispatcher dispatcher;
     dispatcher.attach(&instance.eventLoop());
