@@ -8,7 +8,7 @@
 using namespace fcitx;
 
 int main() {
-    char arg0[] = "testhallelujah";
+    char arg0[] = "testbeast";
     char arg1[] = "--disable=all";
     char arg2[] = "--enable=beast";
     char *argv[] = {arg0, arg1, arg2};

@@ -54,6 +54,8 @@ jobs:
         uses: fcitx/github-actions@cmake
         with:
           path: fcitx5-beast
+          cmake-options: >-
+            -DBUILD_SHARED_FCITX_ADDON=Off
 
       - name: Test
         run: |
