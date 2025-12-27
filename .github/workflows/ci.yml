@@ -10,7 +10,7 @@ jobs:
   lint:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install dependencies
         run: sudo apt install -y clang-format
@@ -25,15 +25,15 @@ jobs:
     container: archlinux:latest
     steps:
       - name: Install dependencies
-        run: pacman -Syu --noconfirm base-devel clang cmake ninja extra-cmake-modules fmt libuv boost lsof
+        run: pacman -Syu --noconfirm base-devel clang cmake ninja extra-cmake-modules libuv boost lsof
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           repository: fcitx/fcitx5
           path: fcitx5
 
       - name: Cache fcitx5 data files
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: 'fcitx5/**/*.tar.*'
           key: ${{ runner.os }}-${{ hashFiles('fcitx5/src/modules/spell/CMakeLists.txt')}}
@@ -46,7 +46,7 @@ jobs:
             -DENABLE_KEYBOARD=Off -DENABLE_X11=Off -DENABLE_WAYLAND=Off -DENABLE_ENCHANT=Off
             -DENABLE_DBUS=Off -DENABLE_SERVER=Off -DENABLE_EMOJI=Off -DUSE_SYSTEMD=Off -DENABLE_TEST=OFF
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           path: fcitx5-beast
 

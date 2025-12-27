@@ -21,6 +21,8 @@ namespace asio = boost::asio;
 
 using ConfigGetter = std::function<std::string(const char *)>;
 using ConfigSetter = std::function<void(const char *, const char *)>;
+using RemoteHandler = std::function<std::pair<bool, std::string>(
+    const std::string_view, const char *)>;
 
 namespace fcitx {
 
@@ -58,6 +60,7 @@ FCITX_CONFIGURATION(BeastConfig,
 
 extern ConfigGetter configGetter_;
 extern ConfigSetter configSetter_;
+extern RemoteHandler remoteHandler_;
 
 class Beast : public AddonInstance {
 public:
@@ -72,6 +75,7 @@ public:
     void reloadConfig() override;
     void setConfigGetter(ConfigGetter getter) { configGetter_ = getter; }
     void setConfigSetter(ConfigSetter setter) { configSetter_ = setter; }
+    void setRemoteHandler(RemoteHandler handler) { remoteHandler_ = handler; }
 
 private:
     static const inline std::string ConfPath = "conf/beast.conf";
