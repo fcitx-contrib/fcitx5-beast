@@ -28,6 +28,7 @@ int main() {
 
     bool getterCalled = false;
     bool setterCalled = false;
+    bool remoteCalled = false;
 
     beast->setConfigGetter([&](const char *) {
         getterCalled = true;
@@ -36,6 +37,11 @@ int main() {
     beast->setConfigSetter([&](const char *, const char *) {
         setterCalled = true;
         return "";
+    });
+    beast->setRemoteHandler([&](const std::string_view,
+                                const char *) -> std::pair<bool, std::string> {
+        remoteCalled = true;
+        return {true, ""};
     });
 
     // Listen on default unix socket.
@@ -52,6 +58,12 @@ int main() {
     assert(std::system("curl --unix-socket /tmp/fcitx5.sock -X POST -d '{}' "
                        "http://fcitx/config/addon/beast") == 0);
     assert(setterCalled);
+
+    // Remote works.
+    assert(!remoteCalled);
+    assert(std::system("curl --unix-socket /tmp/fcitx5.sock -X POST "
+                       "http://fcitx/remote/c") == 0);
+    assert(remoteCalled);
 
     // Unix socket path reset works.
     auto config = dynamic_cast<const BeastConfig *>(beast->getConfig());
@@ -73,6 +85,7 @@ int main() {
 
     getterCalled = false;
     setterCalled = false;
+    remoteCalled = false;
 
     // Getter works over TCP.
     assert(!getterCalled);
@@ -80,11 +93,17 @@ int main() {
                        "http://127.0.0.1:32489/config/addon/beast") == 0);
     assert(getterCalled);
 
-    // Setter works ovet TCP.
+    // Setter works over TCP.
     assert(!setterCalled);
     assert(std::system("curl -X POST -d '{}' "
                        "http://127.0.0.1:32489/config/addon/beast") == 0);
     assert(setterCalled);
+
+    // Remote works over TCP.
+    assert(!remoteCalled);
+    assert(std::system("curl -X POST "
+                       "http://127.0.0.1:32489/remote/c") == 0);
+    assert(remoteCalled);
 
     // Tcp port reset works.
     cfg.tcp.mutableValue()->port.setValue(32490);

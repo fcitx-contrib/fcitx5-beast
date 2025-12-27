@@ -10,6 +10,8 @@
 #include <unistd.h>
 #endif
 
+#define REMOTE_PREFIX "/remote/"
+
 namespace beast = boost::beast;
 namespace http = beast::http;
 namespace net = boost::asio;
@@ -19,6 +21,10 @@ namespace fcitx {
 
 ConfigSetter configSetter_ = [](const char *, const char *) {};
 ConfigGetter configGetter_ = [](const char *) { return ""; };
+RemoteHandler remoteHandler_ =
+    [](const std::string_view, const char *) -> std::pair<bool, std::string> {
+    return {false, ""};
+};
 
 Beast::Beast(Instance *instance) : instance_(instance) { reloadConfig(); }
 
@@ -109,7 +115,7 @@ private:
 
     // Construct a response message based on the program state.
     void create_response() {
-        if (stringutils::startsWith(request_.target(), "/config/")) {
+        if (request_.target().starts_with("/config/")) {
             std::string uri = "fcitx:/";
             uri += request_.target();
             if (request_.method() == http::verb::get) {
@@ -122,6 +128,15 @@ private:
                 beast::ostream(response_.body()) << "";
                 configSetter_(uri.c_str(), request_.body().data());
             }
+        } else if (request_.target().starts_with(REMOTE_PREFIX) &&
+                   request_.method() == http::verb::post) {
+            std::string_view command = request_.target();
+            stringutils::consumePrefix(command, REMOTE_PREFIX);
+            auto res = remoteHandler_(command, request_.body().data());
+            response_.set(http::field::content_type, "text/plain");
+            response_.result(res.first ? http::status::ok
+                                       : http::status::bad_request);
+            beast::ostream(response_.body()) << res.second;
         } else {
             response_.result(http::status::not_found);
             response_.set(http::field::content_type, "text/plain");
