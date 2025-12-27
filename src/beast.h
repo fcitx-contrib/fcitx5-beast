@@ -35,11 +35,11 @@ FCITX_CONFIGURATION(BeastUnixSocketConfig,
                                              DEFAULT_UNIX_SOCKET_PATH};);
 
 enum class BeastCommunication { UnixSocket, TCP };
-FCITX_CONFIG_ENUM_NAME_WITH_I18N(BeastCommunication,
+FCITX_CONFIG_ENUM_NAME(BeastCommunication,
 #ifdef FCITX5_BEAST_HAS_UNIX_SOCKET
-                                 N_("Unix Socket"),
+                       "Unix Socket",
 #endif
-                                 N_("TCP"));
+                       "TCP");
 
 FCITX_CONFIGURATION(BeastConfig,
                     Option<BeastCommunication> communication{
@@ -53,10 +53,10 @@ FCITX_CONFIGURATION(BeastConfig,
 #ifdef FCITX5_BEAST_HAS_UNIX_SOCKET
                     Option<BeastUnixSocketConfig> unix_socket{this,
                                                               "Unix Socket",
-                                                              _("Unix Socket"),
+                                                              "Unix Socket",
                                                               {}};
 #endif
-                    Option<BeastTcpConfig> tcp{this, "TCP", _("TCP"), {}};);
+                    Option<BeastTcpConfig> tcp{this, "TCP", "TCP", {}};);
 
 extern ConfigGetter configGetter_;
 extern ConfigSetter configSetter_;
@@ -91,6 +91,7 @@ private:
 class BeastFactory : public AddonFactory {
 public:
     AddonInstance *create(AddonManager *manager) override {
+        registerDomain("fcitx5-beast", FCITX_INSTALL_LOCALEDIR);
         return new Beast(manager->instance());
     }
 };

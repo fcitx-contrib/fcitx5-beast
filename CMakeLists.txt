@@ -9,12 +9,18 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(ENABLE_TEST "Build Test" On)
 
 find_package(Gettext REQUIRED)
-find_package(Fcitx5Core 5.1.12 REQUIRED)
+if (NOT TARGET Fcitx5::Core)
+    # Build as an independent project.
+    find_package(Fcitx5Core 5.1.12 REQUIRED)
+    include("${FCITX_INSTALL_CMAKECONFIG_DIR}/Fcitx5Utils/Fcitx5CompilerSettings.cmake")
+endif()
 find_package(Boost 1.83 REQUIRED)
 
-include("${FCITX_INSTALL_CMAKECONFIG_DIR}/Fcitx5Utils/Fcitx5CompilerSettings.cmake")
+add_compile_definitions(-DFCITX_GETTEXT_DOMAIN=\"fcitx5-beast\")
+fcitx5_add_i18n_definition()
 
 add_subdirectory(src)
+add_subdirectory(po)
 
 if (ENABLE_TEST)
     enable_testing()
