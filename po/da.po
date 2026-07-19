@@ -1,9 +1,9 @@
 # Danish translations for fcitx5-beast package.
-# Copyright (C) 2026 fcitx5-macos's contributors
+# Copyright (C) 2026 fcitx5-beast's contributors
 # This file is distributed under the same license as the fcitx5-beast package.
 msgid ""
 msgstr ""
-"Project-Id-Version: fcitx 5-beast\n"
+"Project-Id-Version: fcitx5-beast\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-07-19 08:37-0400\n"
 "PO-Revision-Date: 2026-07-19 12:00+0200\n"

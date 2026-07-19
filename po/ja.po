@@ -1,6 +1,6 @@
 # Japanese translations for fcitx5-beast package.
 # fcitx5-beast パッケージの日本語翻訳.
-# Copyright (C) 2026 fcitx5-macos's contributors
+# Copyright (C) 2026 fcitx5-beast's contributors
 # This file is distributed under the same license as the fcitx5-beast package.
 #
 msgid ""

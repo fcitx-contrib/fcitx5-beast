@@ -1,6 +1,6 @@
 # Georgian translations for fcitx5-beast package
 # ფციტქს 5-ის პაკეტის ქართული თარგმანი
-# Copyright (C) 2026 fcitx5-macos's contributors
+# Copyright (C) 2026 fcitx5-beast's contributors
 # This file is distributed under the same license as the fcitx5-beast package.
 #
 msgid ""
