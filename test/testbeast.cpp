@@ -5,6 +5,10 @@
 #include <fcitx/addonmanager.h>
 #include <fcitx/instance.h>
 
+#include <atomic>
+
+#include "testutil.h"
+
 using namespace fcitx;
 
 FCITX_DEFINE_STATIC_ADDON_REGISTRY(getStaticAddon)
@@ -16,6 +20,7 @@ int main() {
     char arg2[] = "--enable=beast";
     char *argv[] = {arg0, arg1, arg2};
     Log::setLogRule("default=5");
+    TestConfigHome configHome;
 
     Instance instance(FCITX_ARRAY_SIZE(argv), argv);
     instance.addonManager().registerDefaultLoader(&getStaticAddon());
@@ -26,14 +31,17 @@ int main() {
     auto beast = dynamic_cast<Beast *>(instance.addonManager().addon("beast"));
     assert(beast);
 
-    bool getterCalled = false;
-    bool setterCalled = false;
-    bool remoteCalled = false;
+    // Written on the server thread and read here.
+    std::atomic<bool> getterCalled{false};
+    std::atomic<bool> setterCalled{false};
+    std::atomic<bool> remoteCalled{false};
 
-    beast->setConfigGetter([&](const char *) {
+    auto countingGetter = [&getterCalled](const char *) {
         getterCalled = true;
         return "";
-    });
+    };
+
+    beast->setConfigGetter(countingGetter);
     beast->setConfigSetter([&](const char *, const char *) {
         setterCalled = true;
         return "";
@@ -45,13 +53,21 @@ int main() {
     });
 
     // Listen on default unix socket.
-    assert(std::system("lsof /tmp/fcitx5.sock") == 0);
+    assert(pollCommand(true, "lsof /tmp/fcitx5.sock"));
 
     // Getter works.
     assert(!getterCalled);
     assert(std::system("curl --unix-socket /tmp/fcitx5.sock "
                        "http://fcitx/config/addon/beast") == 0);
     assert(getterCalled);
+
+    // A hook keeps its own state between requests: it is invoked through the
+    // installed callable, not through a copy of it taken per request.
+    beast->setConfigGetter(
+        [calls = 0](const char *) mutable { return std::to_string(++calls); });
+    assert(httpBody("/tmp/fcitx5.sock", "/config/addon/beast") == "1");
+    assert(httpBody("/tmp/fcitx5.sock", "/config/addon/beast") == "2");
+    beast->setConfigGetter(countingGetter);
 
     // Setter works.
     assert(!setterCalled);
@@ -74,14 +90,14 @@ int main() {
     cfg.save(raw);
     beast->setConfig(raw);
 
-    assert(std::system("lsof /tmp/fcitx5.sock") != 0);
-    assert(std::system("lsof /tmp/fcitx5-another.sock") == 0);
+    assert(pollCommand(false, "lsof /tmp/fcitx5.sock"));
+    assert(pollCommand(true, "lsof /tmp/fcitx5-another.sock"));
 
     // Tcp default port works.
     cfg.communication.setValue(BeastCommunication::TCP);
     cfg.save(raw);
     beast->setConfig(raw);
-    assert(std::system("lsof -i:32489") == 0);
+    assert(pollCommand(true, "lsof -i:32489"));
 
     getterCalled = false;
     setterCalled = false;
@@ -110,8 +126,8 @@ int main() {
     cfg.save(raw);
     beast->setConfig(raw);
 
-    assert(std::system("lsof -i:32489") != 0);
-    assert(std::system("lsof -i:32490") == 0);
+    assert(pollCommand(false, "lsof -i:32489"));
+    assert(pollCommand(true, "lsof -i:32490"));
 
     return 0;
 }
