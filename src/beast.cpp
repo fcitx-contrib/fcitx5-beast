@@ -5,6 +5,8 @@
 #include <boost/beast/http.hpp>
 #include <fcitx-config/iniparser.h>
 
+#include <chrono>
+
 #ifdef FCITX5_BEAST_HAS_UNIX_SOCKET
 // For unlink(2)
 #include <unistd.h>
@@ -19,16 +21,60 @@ using tcp = boost::asio::ip::tcp;
 
 namespace fcitx {
 
-ConfigSetter configSetter_ = [](const char *, const char *) {};
-ConfigGetter configGetter_ = [](const char *) { return ""; };
-RemoteHandler remoteHandler_ =
-    [](const std::string_view, const char *) -> std::pair<bool, std::string> {
-    return {false, ""};
-};
+// A restart waits for the requests in flight, so a client that stalls must not
+// hold its connection, and with it the restart, forever.
+constexpr std::chrono::seconds kRequestTimeout{5};
+
+// Hooks are shared, not copied: a call has to run the callable the host
+// installed, with its own state, and keep it while a newer one replaces it.
+std::shared_ptr<const ConfigSetter> configSetter_ =
+    std::make_shared<const ConfigSetter>([](const char *, const char *) {});
+std::shared_ptr<const ConfigGetter> configGetter_ =
+    std::make_shared<const ConfigGetter>([](const char *) { return ""; });
+std::shared_ptr<const RemoteHandler> remoteHandler_ =
+    std::make_shared<const RemoteHandler>(
+        [](const std::string_view,
+           const char *) -> std::pair<bool, std::string> {
+            return {false, ""};
+        });
+
+namespace {
+
+// The host installs the hooks after the addon exists, while the server thread
+// is already serving.
+std::mutex hooksMutex;
+
+template <typename Hook>
+std::shared_ptr<const Hook> useHook(const std::shared_ptr<const Hook> &hook) {
+    std::lock_guard<std::mutex> lock(hooksMutex);
+    return hook;
+}
+
+} // namespace
+
+void Beast::setConfigGetter(ConfigGetter getter) {
+    std::lock_guard<std::mutex> lock(hooksMutex);
+    configGetter_ = std::make_shared<const ConfigGetter>(std::move(getter));
+}
+
+void Beast::setConfigSetter(ConfigSetter setter) {
+    std::lock_guard<std::mutex> lock(hooksMutex);
+    configSetter_ = std::make_shared<const ConfigSetter>(std::move(setter));
+}
+
+void Beast::setRemoteHandler(RemoteHandler handler) {
+    std::lock_guard<std::mutex> lock(hooksMutex);
+    remoteHandler_ = std::make_shared<const RemoteHandler>(std::move(handler));
+}
 
 Beast::Beast(Instance *instance) : instance_(instance) { reloadConfig(); }
 
-Beast::~Beast() { stopThread(); }
+Beast::~Beast() {
+    alive_->store(false);
+    stopThread();
+    // Drop the handlers before the members they report back to are gone.
+    ioc.reset();
+}
 
 void Beast::setConfig(const RawConfig &config) {
     config_.load(config);
@@ -37,25 +83,117 @@ void Beast::setConfig(const RawConfig &config) {
 }
 
 void Beast::reloadConfig() {
+    readAsIni(config_, ConfPath);
+    restartWhenIdle();
+}
+
+bool Beast::requestStarted() {
+    std::lock_guard<std::mutex> lock(restartMutex_);
+    if (restarting_) {
+        return false;
+    }
+    ++inflight_;
+    return true;
+}
+
+void Beast::requestFinished() {
+    bool restart;
+    {
+        std::lock_guard<std::mutex> lock(restartMutex_);
+        restart = (--inflight_ == 0) && restartPending_;
+    }
+
+    // The addon may be going away, and the connections dropped with its
+    // io_context end up here.
+    if (!restart || !alive_->load()) {
+        return;
+    }
+
+    // The server thread cannot restart itself; the fcitx loop can, once this
+    // response is out.
+    auto alive = alive_;
+    instance_->eventDispatcher().schedule([this, alive] {
+        if (alive->load()) {
+            restartIfPending();
+        }
+    });
+}
+
+void Beast::restartIfPending() {
+    {
+        std::lock_guard<std::mutex> lock(restartMutex_);
+        // A reload may have restarted meanwhile, and a second restart would
+        // close admission on a listener that is already current.
+        if (!restartPending_) {
+            return;
+        }
+        restartPending_ = false;
+    }
+
+    restartWhenIdle();
+}
+
+void Beast::restartWhenIdle() {
+    {
+        std::lock_guard<std::mutex> lock(restartMutex_);
+        // Admission stays closed for the whole window, or new requests would
+        // keep inflight_ above zero and postpone the restart indefinitely.
+        restarting_ = true;
+        if (inflight_ > 0) {
+            // The handler is on the thread we would join, most likely waiting
+            // for this thread to apply the config it sent.
+            restartPending_ = true;
+            return;
+        }
+        restartPending_ = false;
+    }
+
+    restartServer();
+
+    std::lock_guard<std::mutex> lock(restartMutex_);
+    restarting_ = false;
+}
+
+void Beast::restartServer() {
     if (serverThread_.joinable()) {
         stopThread();
     }
-    readAsIni(config_, ConfPath);
     startThread();
 }
 
-template <class Socket>
+template <class Protocol>
 class http_connection
-    : public std::enable_shared_from_this<http_connection<Socket>> {
+    : public std::enable_shared_from_this<http_connection<Protocol>> {
 public:
-    http_connection(Socket socket) : socket_(std::move(socket)) {}
+    using Stream = beast::basic_stream<Protocol>;
+
+    http_connection(typename Protocol::socket socket, Beast *owner)
+        : stream_(std::move(socket)), owner_(owner),
+          accepted_(owner->requestStarted()) {}
+
+    ~http_connection() {
+        if (accepted_) {
+            owner_->requestFinished();
+        }
+    }
 
     // Initiate the asynchronous operations associated with the connection.
-    void start() { read_request(); }
+    void start() {
+        if (!accepted_) {
+            refuse();
+            return;
+        }
+        read_request();
+    }
 
 private:
-    // The socket for the currently connected client.
-    Socket socket_;
+    // The socket for the currently connected client. Each operation is on a
+    // deadline so that a stalled client cannot hold the connection open.
+    Stream stream_;
+
+    // The addon that counts this connection as an in-flight request.
+    Beast *owner_;
+    const bool accepted_;
 
     // The buffer for performing reads.
     beast::flat_buffer buffer_{8192};
@@ -66,12 +204,24 @@ private:
     // The response message.
     http::response<http::dynamic_body> response_;
 
+    // Serving a connection that arrived while the server is restarting would
+    // have its socket closed mid-response.
+    void refuse() {
+        response_.version(11);
+        response_.result(http::status::service_unavailable);
+        response_.set(http::field::content_type, "text/plain");
+        response_.keep_alive(false);
+        beast::ostream(response_.body()) << "Beast is restarting\r\n";
+        write_response();
+    }
+
     // Asynchronously receive a complete request message.
     void read_request() {
         auto self = this->shared_from_this();
 
+        stream_.expires_after(kRequestTimeout);
         http::async_read(
-            socket_, buffer_, request_,
+            stream_, buffer_, request_,
             [self](beast::error_code ec, std::size_t bytes_transferred) {
                 boost::ignore_unused(bytes_transferred);
                 if (!ec)
@@ -121,18 +271,20 @@ private:
             if (request_.method() == http::verb::get) {
                 response_.result(http::status::ok);
                 response_.set(http::field::content_type, "application/json");
-                beast::ostream(response_.body()) << configGetter_(uri.c_str());
+                beast::ostream(response_.body())
+                    << (*useHook(configGetter_))(uri.c_str());
             } else if (request_.method() == http::verb::post) {
                 response_.result(http::status::ok);
                 response_.set(http::field::content_type, "text/plain");
                 beast::ostream(response_.body()) << "";
-                configSetter_(uri.c_str(), request_.body().data());
+                (*useHook(configSetter_))(uri.c_str(), request_.body().data());
             }
         } else if (request_.target().starts_with(REMOTE_PREFIX) &&
                    request_.method() == http::verb::post) {
             std::string_view command = request_.target();
             stringutils::consumePrefix(command, REMOTE_PREFIX);
-            auto res = remoteHandler_(command, request_.body().data());
+            auto handler = useHook(remoteHandler_);
+            auto res = (*handler)(command, request_.body().data());
             response_.set(http::field::content_type, "text/plain");
             response_.result(res.first ? http::status::ok
                                        : http::status::bad_request);
@@ -150,9 +302,13 @@ private:
 
         response_.content_length(response_.body().size());
 
-        http::async_write(socket_, response_,
+        // Re-armed for the write: a handler can be slow, and a read deadline
+        // left over would fail the response.
+        stream_.expires_after(kRequestTimeout);
+        http::async_write(stream_, response_,
                           [self](beast::error_code ec, std::size_t) {
-                              self->socket_.shutdown(Socket::shutdown_send, ec);
+                              self->stream_.socket().shutdown(
+                                  Protocol::socket::shutdown_send, ec);
                           });
         FCITX_INFO() << response_.result_int() << " "
                      << request_.method_string() << " " << request_.target();
@@ -160,54 +316,75 @@ private:
 };
 
 // "Loop" forever accepting new connections.
-template <class Acceptor, class Socket>
-void http_server(Acceptor &acceptor, Socket &socket) {
-    acceptor.async_accept(socket, [&](beast::error_code ec) {
+template <class Acceptor>
+void http_server(Acceptor &acceptor,
+                 typename Acceptor::protocol_type::socket &socket,
+                 Beast *owner) {
+    acceptor.async_accept(socket, [&acceptor, &socket,
+                                   owner](beast::error_code ec) {
         if (!ec)
-            std::make_shared<http_connection<Socket>>(std::move(socket))
+            std::make_shared<http_connection<typename Acceptor::protocol_type>>(
+                std::move(socket), owner)
                 ->start();
-        http_server(acceptor, socket);
+        http_server(acceptor, socket, owner);
     });
 }
 
-void Beast::startServer() {
-    ioc = std::make_shared<asio::io_context>();
-
+void Beast::startServer(const std::shared_ptr<asio::io_context> &context,
+                        BeastCommunication communication,
+                        const std::string &socketPath, int port) {
 #ifdef FCITX5_BEAST_HAS_UNIX_SOCKET
-    if (config_.communication.value() == BeastCommunication::UnixSocket) {
-        auto path = config_.unix_socket.value().path.value();
-        (void)::unlink(path.c_str());
-        auto const ep = asio::local::stream_protocol::endpoint{path};
-        asio::local::stream_protocol::acceptor acceptor{*ioc, ep};
-        asio::local::stream_protocol::socket socket{*ioc};
-        http_server(acceptor, socket);
-        ioc->run();
+    if (communication == BeastCommunication::UnixSocket) {
+        (void)::unlink(socketPath.c_str());
+        auto const ep = asio::local::stream_protocol::endpoint{socketPath};
+        asio::local::stream_protocol::acceptor acceptor{*context, ep};
+        asio::local::stream_protocol::socket socket{*context};
+        http_server(acceptor, socket, this);
+        context->run();
     } else {
 #endif
         auto const address = asio::ip::make_address("127.0.0.1");
-        tcp::acceptor acceptor{
-            *ioc, {address, (unsigned short)config_.tcp.value().port.value()}};
-        tcp::socket socket{*ioc};
-        http_server(acceptor, socket);
-        ioc->run();
+        tcp::acceptor acceptor{*context, {address, (unsigned short)port}};
+        tcp::socket socket{*context};
+        http_server(acceptor, socket, this);
+        context->run();
 #ifdef FCITX5_BEAST_HAS_UNIX_SOCKET
     }
 #endif
 }
 
 void Beast::startThread() {
-    serverThread_ = std::thread([this] {
-        try {
-            startServer();
-        } catch (const std::exception &e) {
-            FCITX_ERROR() << "Error in Beast: " << e.what();
-        }
-    });
+    // Read on the fcitx thread, so the server never touches config_ while
+    // setConfig() rewrites it.
+    const auto communication = config_.communication.value();
+#ifdef FCITX5_BEAST_HAS_UNIX_SOCKET
+    const auto socketPath = communication == BeastCommunication::UnixSocket
+                                ? config_.unix_socket.value().path.value()
+                                : std::string();
+#else
+    const auto socketPath = std::string();
+#endif
+    const auto port = config_.tcp.value().port.value();
+
+    ioc = std::make_shared<asio::io_context>();
+    auto context = ioc;
+    serverThread_ =
+        std::thread([this, context, communication, socketPath, port] {
+            try {
+                startServer(context, communication, socketPath, port);
+            } catch (const std::exception &e) {
+                FCITX_ERROR() << "Error in Beast: " << e.what();
+            }
+        });
 }
 
 void Beast::stopThread() {
-    ioc->stop();
-    serverThread_.join();
+    if (ioc) {
+        ioc->stop();
+    }
+    if (serverThread_.joinable()) {
+        serverThread_.join();
+    }
 }
 } // namespace fcitx
 
